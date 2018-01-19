@@ -1,0 +1,127 @@
+#Load packages
+
+library(xts)
+library(dygraphs)
+library(plotly)
+library(dplyr)
+
+#-----------------------------------------------------------------------------
+
+# Set Desktop access and importa data into R
+Login <- as.name(Sys.getenv("USERNAME"))
+
+setwd(paste("C:/Users/", Login, "/Desktop/", sep = ""))
+input.path <- paste(getwd(), "/BRAZIL_SOY_2.2.csv", sep = "")
+Data <- read.csv(input.path, header=TRUE, sep=",", na.strings="NA", dec=".",
+                   stringsAsFactors = FALSE) #, strip.white = FALSE)
+
+#-----------------------------------------------------------------------------
+#Filter the data by consumption center, Mato Grosso, and biome
+
+BR.AM  <- filter(Data, COUNTRY == "Brazil" & STATE == "MATO GROSSO" & BIOME == "AMAZONIA")
+BR.CER <- filter(Data, COUNTRY == "Brazil" & STATE == "MATO GROSSO" & BIOME == "CERRADO")
+CH.AM  <- filter(Data, COUNTRY == "China"  & STATE == "MATO GROSSO" & BIOME == "AMAZONIA")
+CH.CER <- filter(Data, COUNTRY == "China"  & STATE == "MATO GROSSO" & BIOME == "CERRADO")
+
+# Provide annual sums of soy flowing to each consumption center
+
+BR.AM.sum  <- aggregate(BR.AM$TOTAL, by=list(BR.AM$YEAR), sum)
+BR.CER.sum <- aggregate(BR.CER$TOTAL, by=list(BR.CER$YEAR), sum, na.rm = TRUE)
+CH.AM.sum  <- aggregate(CH.AM$TOTAL, by=list(CH.AM$YEAR), sum, na.rm = TRUE)
+CH.CER.sum <- aggregate(CH.CER$TOTAL, by=list(CH.CER$YEAR), sum, na.rm = TRUE)
+
+#-----------------------------------------------------------------------------
+# Plot data as dygraph for publication as html
+
+year <- as.character(unique(Data$YEAR))
+date <- as.POSIXct(sapply(1:6, function(x){
+                               format(as.Date(paste(year[x], "-01-01", sep = ""), "%Y-%m-%d"))
+                               }))
+
+# Combine all data, convert areas into km2 (rounded to nearest 0.1 km2)
+Table <- data.frame(date, round(BR.AM.sum$x/100, 1), 
+                          round(BR.CER.sum$x/100, 1), 
+                          round(CH.AM.sum$x/100, 1),
+                          round(CH.CER.sum$x/100, 1))
+colnames(Table) <- c("date", "BR.AM", "BR.CER", "CH.AM", "CH.CER")
+
+# Convert the Table into a time series objecto (for dygraph plotting)
+rownames(Table) <- Table$date
+Table$date <- NULL
+Table2 <- as.xts(Table)
+
+#-----------------------------------------------------------------------------
+# Plot dygraph and export data to html 
+
+Graph <- dygraph(Table2, main = "Deforestation in Mato Grosso for Brazil and China's Soy Consumption") %>%
+  dySeries("BR.AM", label = "BRA - Amazon", drawPoints = TRUE, color = "green", fillGraph = TRUE) %>%
+  dySeries("BR.CER", label = "BRA - Cerrado", drawPoints = TRUE, color = "orange") %>%
+  dySeries("CH.AM", label = "CHI - Amazon", drawPoints = TRUE, color = "green", fillGraph = TRUE) %>%
+  dySeries("CH.CER", label = "CHI - Cerrado", drawPoints = TRUE, color = "orange") %>%
+  dyAnnotation(time(Table2)[2], text = "BRAZIL", width = 60, tooltip = "AMAZON", series = "BRA - Amazon") %>%
+  dyAnnotation(time(Table2)[2], text = "CHINA", width = 60, tooltip = "AMAZON", series = "CHI - Amazon") %>%
+  dyAnnotation(time(Table2)[2], text = "BRAZIL", width = 60, tooltip = "CERRADO", series = "BRA - Cerrado") %>%
+  dyAnnotation(time(Table2)[2], text = "CHINA", width = 60, tooltip = "CERRADO", series = "CHI - Cerrado") %>%
+  dyAnnotation(time(Table2)[1], text = "Note 1", width = 50, tooltip = "Soy Deforestation from Amazon and Cerrado biomes almost equal", series = "CHI - Cerrado") %>%
+  dyAnnotation(time(Table2)[5], text = "Note 2", width = 50, tooltip = "Soy Deforestation greater in Amazon than in Cerrado", series = "BRA - Amazon") %>%
+  dyAxis("x", drawGrid = FALSE) %>%
+  dyAxis("y", label = "Soy Maximum deforestation (km<sup> 2</sup> y<sup> -1</sup>)") %>%
+  dyHighlight(highlightSeriesOpts = list(strokeWidth = 3)) %>%
+  dyHighlight(highlightCircleSize = 2, highlightSeriesBackgroundAlpha = 0.2,
+              hideOnMouseOut = TRUE) %>%
+  dyLegend(show = "onmouseover", width = 800, hideOnMouseOut = TRUE)
+  
+Graph
+
+## Export dygraph to html
+htmlwidgets::saveWidget(as_widget(Graph), paste(getwd(), "/Lathuilliere_Trase_Result.html", sep = ""))
+
+#-----------------------------------------------------------------------------
+# Calculate China's soy deforesation impacts to biodiversity in 2015 in Mato Grosso's Municipalities
+
+# define characterization factors following Chaudhary et al. (2016)
+# Factor represent the loss of global species in PDFy/m2
+CF.AM  <- 6.74E-14
+CF.CER <- 5.94E-14
+
+# Obtain data for 2015 and sum per Municipality in Mato Grosso
+CH.AM.2015      <- filter(CH.AM, YEAR == "2015")
+CH.CER.2015     <- filter(CH.CER, YEAR == "2015")
+CH.AM.2015.sum  <- aggregate(CH.AM.2015$TOTAL, by=list(CH.AM.2015$MUNICIPALITY), sum)
+CH.CER.2015.sum  <- aggregate(CH.CER.2015$TOTAL, by=list(CH.CER.2015$MUNICIPALITY), sum)
+
+colnames(CH.AM.2015.sum)  <- c("MU", "Area.ha") 
+colnames(CH.CER.2015.sum) <- c("MU", "Area.ha")
+
+# Apply the average characterization factors for each Municipality
+CH.AM.2015.sum$Biodiversity  <- CH.AM.2015.sum$Area.ha*10000*CF.AM
+CH.CER.2015.sum$Biodiversity <- CH.CER.2015.sum$Area.ha*10000*CF.CER
+
+# Obtain relative impacts based on maximum impacts results in both biomes
+# combine the results into one data frame for export
+Impact <- ifelse(max(CH.AM.2015.sum$Biodiversity) > max (CH.CER.2015.sum$Biodiversity), 
+                 max(CH.AM.2015.sum$Biodiversity),
+                 max(CH.CER.2015.sum$Biodiversity))
+CH.AM.2015.sum$Rel.Biod  <- CH.AM.2015.sum$Biodiversity/Impact
+CH.CER.2015.sum$Rel.Biod <- CH.CER.2015.sum$Biodiversity/Impact
+
+Results <- rbind(CH.AM.2015.sum, CH.CER.2015.sum)
+Results <- Results[order(Results$MU),]
+
+# Export file for plotting in QGIS
+write.table(Results, paste(getwd(), "/Lathuilliere_Results_Map.csv", sep = ""), sep = ",",  na = "NA", row.names = FALSE, col.names = TRUE)
+
+#-----------------------------------------------------------------------------
+# Determine the main actors in moving soy to China in 2015
+
+Traders <- rbind(CH.AM.2015, CH.CER.2015)
+Traders.sum <- aggregate(Traders$TOTAL, by=list(Traders$IMPORTER), sum)
+Traders.sum$Pct <- round((Traders.sum$x/sum(Traders.sum$x))*100, 1)
+Traders.sum <- Traders.sum[order(Traders.sum$Pct, decreasing = TRUE),]
+colnames(Traders.sum) <- c("IMPORTER", "TOTAL", "PCT")
+
+# Export file for plotting in QGIS
+write.table(Traders.sum, paste(getwd(), "/Lathuilliere_Results_Traders.csv", sep = ""), sep = ",",  na = "NA", row.names = FALSE, col.names = TRUE)
+
+#-----------------------------------------------------------------------------
+#### END
