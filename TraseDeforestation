@@ -79,7 +79,7 @@ htmlwidgets::saveWidget(as_widget(Graph), paste(getwd(), "/Lathuilliere_Trase_Re
 #-----------------------------------------------------------------------------
 # Calculate China's soy deforesation impacts to biodiversity in 2015 in Mato Grosso's Municipalities
 
-# define characterization factors following Chaudhary et al. (2016)
+# define characterization factors following Chaudhary et al. (2015)
 # Factor represent the loss of global species in PDFy/m2
 CF.AM  <- 6.74E-14
 CF.CER <- 5.94E-14
